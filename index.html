@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>유튜브 댓글 파이프라인</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a66; --line: #e2e0da;
+    --accent: #c4302b; --ok: #2f7d4f; --warn: #b7791f; --bad: #b42318; --info: #2b5fab;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161614; --panel: #201f1d; --ink: #ecebe6; --muted: #a09e97; --line: #34332f;
+      --accent: #ff5a52; --ok: #5cc28a; --warn: #e3a948; --bad: #ff6b5f; --info: #7aa7ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  header { padding: 28px 16px 8px; max-width: 1100px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 24px; }
+  header p { margin: 0; color: var(--muted); }
+  main { max-width: 1100px; margin: 0 auto; padding: 8px 16px 48px; }
+  .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 16px 0 20px; }
+  .step { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .step b { display: block; font-size: 13px; color: var(--accent); }
+  .step span { font-size: 13px; color: var(--muted); }
+  .step.on { border-color: var(--accent); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  h2 { margin: 0 0 10px; font-size: 17px; }
+  textarea, input, select { width: 100%; font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  textarea { min-height: 140px; resize: vertical; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  .stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .stat b { font-size: 20px; display: block; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-top: 10px; }
+  .card .meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--muted); }
+  .tag { font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid currentColor; }
+  .t-질문 { color: var(--info); } .t-칭찬 { color: var(--ok); } .t-불만 { color: var(--warn); }
+  .t-스팸 { color: var(--bad); } .t-악성 { color: var(--bad); } .t-일반 { color: var(--muted); }
+  .text { margin: 6px 0 8px; }
+  .reply textarea { min-height: 64px; }
+  .status { font-size: 12px; font-weight: 600; }
+  .s-승인 { color: var(--ok); } .s-보류 { color: var(--warn); } .s-숨김 { color: var(--bad); }
+  .note { font-size: 13px; color: var(--muted); }
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; }
+  .filters button.on { border-color: var(--accent); color: var(--accent); }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow: auto; font-size: 12px; max-height: 260px; }
+  @media (max-width: 720px) {
+    .flow { grid-template-columns: 1fr 1fr; }
+    .stats { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>유튜브 댓글 자동화 파이프라인</h1>
+  <p>수집 → 정제 → 분류 → 답글 초안 → 사람 검토 → 내보내기. 크리에이터가 댓글창을 매일 직접 훑지 않아도 되도록.</p>
+</header>
+<main>
+  <div class="flow" id="flow">
+    <div class="step" data-s="1"><b>1. 수집</b><span>API 또는 붙여넣기</span></div>
+    <div class="step" data-s="2"><b>2. 정제</b><span>중복·빈 댓글 제거</span></div>
+    <div class="step" data-s="3"><b>3. 분류</b><span>질문·칭찬·불만·스팸·악성</span></div>
+    <div class="step" data-s="4"><b>4. 답글 초안</b><span>유형별 톤 규칙</span></div>
+    <div class="step" data-s="5"><b>5. 검토·내보내기</b><span>사람이 최종 승인</span></div>
+  </div>
+
+  <section>
+    <h2>1. 댓글 수집</h2>
+    <p class="note">한 줄에 댓글 하나. <code>작성자 | 댓글</code> 형식이면 작성자도 읽습니다. 실제 운영에서는 YouTube Data API v3 <code>commentThreads.list</code>로 이 칸을 채웁니다(README 참고).</p>
+    <textarea id="input"></textarea>
+    <div class="row">
+      <button id="sample">샘플 댓글 불러오기</button>
+      <label class="note" style="display:flex;gap:6px;align-items:center">채널 이름
+        <input id="channel" value="동네브루펍" style="width:160px"></label>
+      <button class="primary" id="run">파이프라인 실행</button>
+    </div>
+  </section>
+
+  <section id="result" hidden>
+    <h2>2–3. 정제·분류 결과</h2>
+    <div class="stats" id="stats"></div>
+    <p class="note" id="cleanNote"></p>
+  </section>
+
+  <section id="review" hidden>
+    <h2>4–5. 답글 초안 검토</h2>
+    <p class="note">초안은 자동으로 만들되 게시는 사람이 승인한 것만 합니다. 악성·스팸은 답글 대신 '숨김' 처리로 갑니다.</p>
+    <div class="row">
+      <div class="filters" id="filters"></div>
+      <button id="approveAll">질문·칭찬 일괄 승인</button>
+    </div>
+    <div id="cards"></div>
+  </section>
+
+  <section id="export" hidden>
+    <h2>내보내기</h2>
+    <div class="row">
+      <button id="dlCsv">CSV 저장</button>
+      <button id="dlJson">JSON 저장</button>
+    </div>
+    <pre id="preview"></pre>
+  </section>
+</main>
+
+<script src="src/pipeline.js"></script>
+<script>
+const P = window.Pipeline;
+const PREVIEW_ROWS = 5;          // 내보내기 미리보기 줄 수
+const CATEGORIES = P.CATEGORIES;
+let comments = [];
+let filter = '전체';
+
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+const channelName = () => $('channel').value.trim() || '채널';
+
+function markStep(n) {
+  document.querySelectorAll('.step').forEach(s => s.classList.toggle('on', +s.dataset.s <= n));
+}
+
+function run() {
+  const r = P.run(P.parse($('input').value), channelName());
+  comments = r.comments;
+  markStep(4);
+  $('cleanNote').textContent = `입력 ${r.total}개 → 중복 ${r.dup}개, 너무 짧은 댓글 ${r.short}개 제외 → ${comments.length}개 처리`;
+  ['result', 'review', 'export'].forEach(id => $(id).hidden = false);
+  filter = '전체';
+  render();
+}
+
+function render() {
+  const count = cat => comments.filter(c => c.cat === cat).length;
+  $('stats').innerHTML = CATEGORIES.map(c =>
+    `<div class="stat"><b class="t-${c}">${count(c)}</b><span>${c}</span></div>`).join('');
+
+  $('filters').innerHTML = ['전체', ...CATEGORIES].map(c =>
+    `<button class="${c === filter ? 'on' : ''}" data-f="${c}">${c}</button>`).join('');
+
+  const list = comments.filter(c => filter === '전체' || c.cat === filter);
+  $('cards').innerHTML = list.map(c => `
+    <div class="card" data-id="${c.id}">
+      <div class="meta">
+        <span class="tag t-${c.cat}">${c.cat}</span>
+        <span>${esc(c.author || '(작성자 없음)')}</span>
+        <span>· 근거: ${c.why}</span>
+        <span class="status s-${c.status}">${c.status}</span>
+      </div>
+      <div class="text">${esc(c.text)}</div>
+      ${c.reply !== '' || c.status !== '숨김' ? `
+      <div class="reply"><textarea data-edit="${c.id}">${esc(c.reply)}</textarea></div>` : ''}
+      <div class="row">
+        <select data-cat="${c.id}">${CATEGORIES.map(k => `<option ${k === c.cat ? 'selected' : ''}>${k}</option>`).join('')}</select>
+        <button data-act="승인" data-id="${c.id}" ${c.reply ? '' : 'disabled'}>승인</button>
+        <button data-act="보류" data-id="${c.id}">보류</button>
+        <button data-act="숨김" data-id="${c.id}">숨김</button>
+      </div>
+    </div>`).join('') || '<p class="note">이 유형의 댓글이 없습니다.</p>';
+  document.querySelectorAll('select[data-cat]').forEach(s => s.style.width = '110px');
+
+  const approved = comments.filter(c => c.status === '승인').length;
+  if (approved) markStep(5);
+  $('preview').textContent = P.toCsv(comments).split('\n').slice(0, PREVIEW_ROWS + 1).join('\n')
+    + (comments.length > PREVIEW_ROWS ? `\n… (총 ${comments.length}행, 승인 ${approved}개)` : '');
+}
+
+function download(name, body, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([body], { type }));
+  a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ───── 입력 연결 ─────
+$('sample').onclick = () => { $('input').value = P.SAMPLES; };
+$('run').onclick = run;
+$('filters').onclick = e => { if (e.target.dataset.f) { filter = e.target.dataset.f; render(); } };
+$('approveAll').onclick = () => {
+  comments.forEach(c => { if ((c.cat === '질문' || c.cat === '칭찬') && c.reply) c.status = '승인'; });
+  render();
+};
+$('cards').addEventListener('click', e => {
+  const act = e.target.dataset.act; if (!act) return;
+  const c = comments.find(x => x.id === +e.target.dataset.id);
+  c.status = act; render();
+});
+$('cards').addEventListener('input', e => {
+  const id = e.target.dataset.edit; if (!id) return;
+  comments.find(x => x.id === +id).reply = e.target.value;
+});
+$('cards').addEventListener('change', e => {
+  const id = e.target.dataset.cat; if (!id) return;
+  const c = comments.find(x => x.id === +id);
+  c.cat = e.target.value; c.why = '사람이 수정';
+  c.reply = P.draft(c, channelName());
+  c.status = (c.cat === '스팸' || c.cat === '악성') ? '숨김' : '보류';
+  render();
+});
+$('dlCsv').onclick = () => download('youtube-comments.csv', '﻿' + P.toCsv(comments), 'text/csv;charset=utf-8');
+$('dlJson').onclick = () => download('youtube-comments.json', JSON.stringify(comments, null, 2), 'application/json');
+
+$('input').value = P.SAMPLES;
+</script>
+</body>
+</html>

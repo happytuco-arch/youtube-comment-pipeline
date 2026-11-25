@@ -1,0 +1,12 @@
+{
+  "name": "youtube-comment-pipeline",
+  "version": "1.0.0",
+  "description": "유튜브 댓글 수집·분류·답글 초안 자동화 파이프라인",
+  "main": "src/pipeline.js",
+  "scripts": {
+    "start": "node cli.js",
+    "test": "node --test tests/pipeline.test.cjs"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT"
+}
