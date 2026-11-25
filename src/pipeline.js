@@ -86,6 +86,18 @@
       ...comments.map(c => [c.id, c.author, c.text, c.cat, c.why, c.reply, c.status].map(q).join(','))].join('\n');
   }
 
+  function approve(comments, cats) {
+    comments.forEach(c => { if (cats.includes(c.cat) && c.reply) c.status = '승인'; });
+    return comments;
+  }
+
+  // 게시 대상 고르기: 승인 + 답글 있음 + 실제 유튜브 댓글 ID 있음 + 아직 안 올림
+  function plan(comments) {
+    const reply = comments.filter(c => c.status === '승인' && c.reply && c.reply.trim() && c.commentId && !c.postedId);
+    const hide = comments.filter(c => c.status === '숨김' && c.commentId && !c.hiddenAt);
+    return { reply, hide };
+  }
+
   const SAMPLES = `민지 | 이 카페 위치가 어디인가요? 주말에도 여나요?
 커피러버 | 영상 분위기 너무 좋아요 힐링됩니다 ❤
 ㅇㅇ | 라떼 가격이 너무 비싸네요 좀 실망
@@ -102,5 +114,5 @@
 ㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋ
 태오 | 바리스타님 손이 진짜 빠르시네요 대박`;
 
-  return { CATEGORIES, HIDDEN, MIN_LENGTH, parse, clean, classify, draft, run, toCsv, SAMPLES };
+  return { CATEGORIES, HIDDEN, MIN_LENGTH, parse, clean, classify, draft, run, toCsv, approve, plan, SAMPLES };
 });

@@ -5,7 +5,7 @@
 //   node cli.js --file comments.txt     파일(한 줄에 댓글 하나)로 실행
 //   node cli.js --video <영상ID 또는 URL> 실제 유튜브 댓글로 실행 (YOUTUBE_API_KEY 필요)
 //
-// 옵션: --channel 이름, --max 개수(기본 100), --out 폴더(기본 output)
+// 옵션: --channel 이름, --max 개수(기본 100), --out 폴더(기본 output), --approve 질문,칭찬
 const fs = require('fs');
 const path = require('path');
 const P = require('./src/pipeline.js');
@@ -50,7 +50,10 @@ async function fetchYoutube(id, max, key) {
     if (!res.ok) throw new Error(`YouTube API 오류 (${res.status}): ${data.error?.message || '알 수 없음'}`);
     for (const t of data.items) {
       const s = t.snippet.topLevelComment.snippet;
-      out.push({ author: s.authorDisplayName.replace(/^@/, ''), text: s.textOriginal.replace(/\s*\n\s*/g, ' ') });
+      out.push({
+        commentId: t.snippet.topLevelComment.id, videoId: id,   // 게시(post.js)할 때 답글을 달 위치
+        author: s.authorDisplayName.replace(/^@/, ''), text: s.textOriginal.replace(/\s*\n\s*/g, ' '),
+      });
     }
     pageToken = data.nextPageToken;
     if (!pageToken) break;
@@ -79,6 +82,8 @@ async function main() {
   }
 
   const r = P.run(raw, channel);
+  // --approve 질문,칭찬 : 이 유형의 초안을 바로 '승인' 상태로 (나머지는 comments.json 에서 직접 고침)
+  if (o.approve) P.approve(r.comments, String(o.approve).split(','));
   const outDir = o.out || path.join(__dirname, 'output');
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, 'comments.csv'), '﻿' + P.toCsv(r.comments));
@@ -93,6 +98,7 @@ async function main() {
     console.log(c.reply ? `     ↳ ${c.reply}` : '     ↳ 숨김 처리 권장');
   }
   console.log(`\n[저장] ${path.join(outDir, 'comments.csv')}, comments.json`);
+  console.log('[다음] comments.json 에서 올릴 답글의 status 를 "승인"으로 바꾸고 → node post.js (미리보기) → node post.js --yes (게시)');
 }
 
 main().catch(e => { console.error('오류:', e.message); process.exit(1); });

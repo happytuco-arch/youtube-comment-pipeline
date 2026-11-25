@@ -44,3 +44,23 @@ test('샘플 15개 → 12개 처리', () => {
   assert.strictEqual(r.total, 15);
   assert.strictEqual(r.comments.length, 12);
 });
+
+test('게시 계획: 승인 + 댓글 ID 있음 + 아직 안 올린 것만', () => {
+  const cs = [
+    { status: '승인', reply: '감사', commentId: 'a' },
+    { status: '승인', reply: '감사', commentId: 'b', postedId: 'x' },  // 이미 올림
+    { status: '승인', reply: '감사' },                                 // 샘플이라 ID 없음
+    { status: '보류', reply: '감사', commentId: 'c' },
+    { status: '승인', reply: '  ', commentId: 'd' },                   // 빈 답글
+    { status: '숨김', reply: '', commentId: 'e' },
+  ];
+  const p = P.plan(cs);
+  assert.deepStrictEqual(p.reply.map(c => c.commentId), ['a']);
+  assert.deepStrictEqual(p.hide.map(c => c.commentId), ['e']);
+});
+
+test('--approve 는 답글 있는 지정 유형만 승인한다', () => {
+  const { comments } = P.run(P.parse('a | 어디예요?\nb | 꺼져\nc | 최고'), '채널');
+  P.approve(comments, ['질문', '악성']);
+  assert.deepStrictEqual(comments.map(c => c.status), ['승인', '숨김', '보류']);
+});
